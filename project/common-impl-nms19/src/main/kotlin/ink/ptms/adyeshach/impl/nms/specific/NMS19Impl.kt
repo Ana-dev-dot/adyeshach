@@ -98,8 +98,27 @@ class NMS19Impl : NMS19() {
         )
     }
 
+    @Suppress("UNCHECKED_CAST")
     override fun createPacketPlayOutEntityMetadata(entityId: Int, packedItems: List<MinecraftMeta>): Any {
-        return PacketPlayOutEntityMetadata(entityId, packedItems.map { (it.source() as DataWatcher.Item<*>).value() })
+        val dataValues = packedItems.map { meta ->
+            val dataItem = meta.source()
+            val clazz = dataItem::class.java
+            val method = try {
+                clazz.getDeclaredMethod("value")
+            } catch (e: NoSuchMethodException) {
+                clazz.declaredMethods.firstOrNull {
+                    it.parameterCount == 0 && it.returnType.name.contains("SynchedEntityData\$") && it.returnType != clazz
+                } ?: clazz.methods.firstOrNull {
+                    it.parameterCount == 0 && it.returnType != Void.TYPE && it.returnType != clazz && it.declaringClass == clazz
+                } ?: error("Could not find DataValue getter in DataItem: ${clazz.name}")
+            }
+            method.isAccessible = true
+            method.invoke(dataItem)
+        }
+        // Use reflection to construct the packet to avoid compile-time type mismatch
+        val packetClass = PacketPlayOutEntityMetadata::class.java
+        val constructor = packetClass.constructors.first { it.parameterCount == 2 }
+        return constructor.newInstance(entityId, dataValues as List<Any>)
     }
 
     override fun createClientboundPlayerInfoAddPacket(uuid: UUID, gameProfile: GameProfile): Any {

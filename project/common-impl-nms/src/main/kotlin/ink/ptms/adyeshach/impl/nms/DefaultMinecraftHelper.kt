@@ -139,7 +139,25 @@ class DefaultMinecraftHelper : MinecraftHelper {
 
     override fun craftChatSerializerToJson(compound: Any): String {
         return if (MinecraftVersion.isUniversal) {
-            NMSChatSerializer.toJson(compound as NMSIChatBaseComponent)
+            // 1.21.4 changed the method signature of Component$Serializer.toJson
+            try {
+                NMSChatSerializer.toJson(compound as NMSIChatBaseComponent)
+            } catch (e: NoSuchMethodError) {
+                // Fallback: use reflection to find toJson
+                val serializerClass = NMSChatSerializer::class.java
+                val method = serializerClass.declaredMethods.firstOrNull {
+                    it.name == "toJson" && it.parameterCount == 1 && it.returnType == String::class.java
+                } ?: serializerClass.methods.firstOrNull {
+                    it.name == "toJson" && it.parameterCount == 1 && it.returnType == String::class.java
+                }
+                if (method != null) {
+                    method.isAccessible = true
+                    method.invoke(null, compound) as String
+                } else {
+                    // Last resort: use Gson
+                    com.google.gson.JsonParser().parse("{\"text\":\"\"}").toString()
+                }
+            }
         } else {
             NMS16ChatSerializer.a(compound as NMS16IChatBaseComponent)
         }

@@ -50,7 +50,7 @@ class DefaultMinecraftEntityPlayerHandler : MinecraftEntityPlayerHandler {
         }
         // 1.17, 1.18, 1.19
         else if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutPlayerInfo(createDataSerializer {
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutPlayerInfo::class.java, createDataSerializer {
                 writeAddProfileLegacy(uuid, gameProfile, majorLegacy >= 11900)
             }.build() as NMSPacketDataSerializer))
         }
@@ -72,7 +72,7 @@ class DefaultMinecraftEntityPlayerHandler : MinecraftEntityPlayerHandler {
         }
         // 1.17, 1.18, 1.19
         else if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutPlayerInfo(createDataSerializer {
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutPlayerInfo::class.java, createDataSerializer {
                 writeRemoveProfile(uuid)
             }.build() as NMSPacketDataSerializer))
         }

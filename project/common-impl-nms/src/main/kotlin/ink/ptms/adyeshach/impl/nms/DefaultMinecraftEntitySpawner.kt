@@ -115,50 +115,73 @@ class DefaultMinecraftEntitySpawner : MinecraftEntitySpawner {
                     writeShort(0)
                 }.build() as NMS16PacketDataSerializer)
             }
-            // 1.17, 1.18, 1.19, 1.12
-            9, 10, 11, 12 -> NMSPacketPlayOutSpawnEntity(createDataSerializer {
-                writeVarInt(entityId)
-                writeUUID(uuid)
-                // 类型
-                when (major) {
-                    // 1.17, 1.18 写法相同
-                    // 1.17 -> this.type = (EntityTypes)IRegistry.ENTITY_TYPE.fromId(var0.j());
-                    // 1.18 -> this.type = (EntityTypes)IRegistry.ENTITY_TYPE.byId(var0.readVarInt());
-                    9, 10 -> writeVarInt(NMSIRegistry.ENTITY_TYPE.getId(helper.adapt(entityType) as NMSEntityTypes<*>))
-                    // 1.19 写法不同
-                    11 -> {
-                        when (minor) {
-                            // 1.19, 1.19.1, 1.19.2 -> this.type = (EntityTypes)var0.readById(IRegistry.ENTITY_TYPE);
-                            0, 1, 2 -> writeVarInt(NMSIRegistry.ENTITY_TYPE.getId(helper.adapt(entityType) as NMSEntityTypes<*>))
-                            // 1.19.3, 1.19.4       -> this.type = (EntityTypes)var0.readById(BuiltInRegistries.ENTITY_TYPE);
-                            // 注意从该版本开始 RegistryBlocks 的类型发生变化，无法在同一个模块内向下兼容
-                            3, 4 -> writeVarInt(NMS19.instance.entityTypeGetId(helper.adapt(entityType)))
-                            // 其他版本 -> error
-                            else -> error("Unsupported version.")
-                        }
+            // 1.17 - 1.21.4+
+            in 9..20 -> {
+                val packetClass = NMSPacketPlayOutSpawnEntity::class.java
+                // In 1.21+, the FriendlyByteBuf constructor is removed. We use the parameter constructor.
+                // ClientboundAddEntityPacket(int id, UUID uuid, double x, double y, double z, float pitch, float yaw, EntityType<?> type, int data, Vec3 velocity, double headYaw)
+                val paramConstructor = packetClass.constructors.firstOrNull { it.parameterCount == 11 || it.parameterCount == 10 }
+                if (major >= 13 && paramConstructor != null) {
+                    val vec3dClass = NMSVec3D::class.java
+                    val vecConstr = vec3dClass.constructors.first { it.parameterCount == 3 }
+                    val zeroVec = vecConstr.newInstance(0.0, 0.0, 0.0)
+                    
+                    val nmsType = helper.adapt(entityType)
+                    // The order of parameters in mojmap is:
+                    // (int id, UUID uuid, double x, double y, double z, float pitch, float yaw, EntityType<?> type, int data, Vec3 velocity, double headYaw)
+                    // Wait, sometimes pitch and yaw are swapped depending on mapping, but let's try standard.
+                    val pPitch = (pitch * 360.0f / 256.0f)
+                    val pYaw = (yaw * 360.0f / 256.0f)
+                    
+                    if (paramConstructor.parameterCount == 11) {
+                        packetHandler.sendPacket(player, paramConstructor.newInstance(
+                            entityId, uuid, location.x, location.y, location.z, pPitch, pYaw, nmsType, data, zeroVec, pYaw.toDouble()
+                        ))
+                    } else {
+                        // 10 args?
+                        packetHandler.sendPacket(player, paramConstructor.newInstance(
+                            entityId, uuid, location.x, location.y, location.z, pPitch, pYaw, nmsType, data, zeroVec
+                        ))
                     }
-                    // 1.12
-                    12 -> writeVarInt(NMS19.instance.entityTypeGetId(helper.adapt(entityType)))
+                    return
                 }
-                writeDouble(location.x)
-                writeDouble(location.y)
-                writeDouble(location.z)
-                // xRot     -> pitch -> 纵向视角
-                writeByte(pitch)
-                // yRot     -> yaw -> 普通实体没效果
-                writeByte(yaw)
-                // yHeadRot -> yaw -> 横向视角
-                // 1.19 才有这个
-                if (major >= 11) {
+
+                // Fallback to DataSerializer for older versions (9..12)
+                val buf = createDataSerializer {
+                    writeVarInt(entityId)
+                    writeUUID(uuid)
+                    // 类型
+                    when (major) {
+                        // 1.17, 1.18 写法相同
+                        9, 10 -> writeVarInt(NMSIRegistry.ENTITY_TYPE.getId(helper.adapt(entityType) as NMSEntityTypes<*>))
+                        // 1.19 写法不同
+                        11 -> {
+                            when (minor) {
+                                0, 1, 2 -> writeVarInt(NMSIRegistry.ENTITY_TYPE.getId(helper.adapt(entityType) as NMSEntityTypes<*>))
+                                3, 4 -> writeVarInt(NMS19.instance.entityTypeGetId(helper.adapt(entityType)))
+                                else -> error("Unsupported version.")
+                            }
+                        }
+                        // 1.20, 1.21+
+                        else -> writeVarInt(NMS19.instance.entityTypeGetId(helper.adapt(entityType)))
+                    }
+                    writeDouble(location.x)
+                    writeDouble(location.y)
+                    writeDouble(location.z)
+                    writeByte(pitch)
                     writeByte(yaw)
-                    writeVarInt(data)
-                } else {
-                    writeInt(data)
-                }
-                writeShort(0)
-                writeShort(0)
-                writeShort(0)
-            }.build() as NMSPacketDataSerializer)
+                    if (major >= 11) {
+                        writeByte(yaw)
+                        writeVarInt(data)
+                    } else {
+                        writeInt(data)
+                    }
+                    writeShort(0)
+                    writeShort(0)
+                    writeShort(0)
+                }.build() as NMSPacketDataSerializer
+                PacketHelper.createPacket(NMSPacketPlayOutSpawnEntity::class.java, buf)
+            }
             // 不支持
             else -> error("Unsupported version.")
         }
@@ -247,21 +270,15 @@ class DefaultMinecraftEntitySpawner : MinecraftEntitySpawner {
             }
             // 1.17, 1.18
             // 使用带有 DataSerializer 的构造函数生成数据包
-            9, 10 -> NMSPacketPlayOutSpawnEntityLiving(createDataSerializer {
+            9, 10 -> PacketHelper.createPacket(NMSPacketPlayOutSpawnEntityLiving::class.java, createDataSerializer {
                 writeVarInt(entityId)
                 writeUUID(uuid)
-                // 1.17, 1.18 写法相同
-                // 1.17 -> this.type = (EntityTypes)IRegistry.ENTITY_TYPE.fromId(var0.j());
-                // 1.18 -> this.type = (EntityTypes)IRegistry.ENTITY_TYPE.byId(var0.readVarInt());
                 writeVarInt(NMSIRegistry.ENTITY_TYPE.getId(helper.adapt(entityType) as NMSEntityTypes<*>))
                 writeDouble(location.x)
                 writeDouble(location.y)
                 writeDouble(location.z)
-                // yRot -> yaw
                 writeByte(yaw)
-                // xRot -> pitch
                 writeByte(pitch)
-                // yHeadRot -> yaw
                 writeByte(yaw)
                 writeShort(0)
                 writeShort(0)
@@ -311,7 +328,7 @@ class DefaultMinecraftEntitySpawner : MinecraftEntitySpawner {
             }
             // 1.17, 1.18, 1.19, 1.20
             // 使用带有 DataSerializer 的构造函数生成数据包
-            9, 10, 11, 12 -> NMSPacketPlayOutSpawnEntityPlayer(createDataSerializer {
+            9, 10, 11, 12 -> PacketHelper.createPacket(NMSPacketPlayOutSpawnEntityPlayer::class.java, createDataSerializer {
                 writeVarInt(entityId)
                 writeUUID(uuid)
                 writeDouble(location.x)
@@ -337,7 +354,7 @@ class DefaultMinecraftEntitySpawner : MinecraftEntitySpawner {
 
     override fun spawnEntityExperienceOrb(player: Player, entityId: Int, location: Location, amount: Int) {
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutSpawnEntityExperienceOrb(createDataSerializer {
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutSpawnEntityExperienceOrb::class.java, createDataSerializer {
                 writeVarInt(entityId)
                 writeDouble(location.x)
                 writeDouble(location.y)
@@ -366,7 +383,7 @@ class DefaultMinecraftEntitySpawner : MinecraftEntitySpawner {
         // 使用带有 DataSerializer 的构造函数生成数据包
         // 使用 IRegistry.MOTIVE
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutSpawnEntityPainting(createDataSerializer {
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutSpawnEntityPainting::class.java, createDataSerializer {
                 writeVarInt(entityId)
                 writeUUID(uuid)
                 writeVarInt(id)

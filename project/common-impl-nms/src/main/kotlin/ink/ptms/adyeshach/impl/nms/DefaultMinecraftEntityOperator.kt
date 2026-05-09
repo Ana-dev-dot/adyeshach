@@ -55,19 +55,19 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
                     writeBoolean(onGround)
                 }.build() as NMS9PacketDataSerializer)
             }
-            // 1.17, 1.18, 1.19, 1.20
-            // 使用带有 DataSerializer 的构造函数生成数据包
-            9, 10, 11, 12 -> NMSPacketPlayOutEntityTeleport(createDataSerializer {
-                writeVarInt(entityId)
-                writeDouble(location.x)
-                writeDouble(location.y)
-                writeDouble(location.z)
-                writeByte(yaw)
-                writeByte(pitch)
-                writeBoolean(onGround)
-            }.build() as NMSPacketDataSerializer)
-            // 1.21
-            13 -> error("还不支持")
+            // 1.17, 1.18, 1.19, 1.20, 1.21+
+            in 9..20 -> {
+                val buf = createDataSerializer {
+                    writeVarInt(entityId)
+                    writeDouble(location.x)
+                    writeDouble(location.y)
+                    writeDouble(location.z)
+                    writeByte(yaw)
+                    writeByte(pitch)
+                    writeBoolean(onGround)
+                }.build() as NMSPacketDataSerializer
+                PacketHelper.createPacket(NMSPacketPlayOutEntityTeleport::class.java, buf)
+            }
             // 不支持
             else -> error("Unsupported version.")
         }
@@ -129,10 +129,11 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
 
     override fun updateHeadRotation(player: List<Player>, entityId: Int, yaw: Float) {
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutEntityHeadRotation(createDataSerializer {
+            val buf = createDataSerializer {
                 writeVarInt(entityId)
                 writeByte(ifloor(yaw * 256.0 / 360.0).toByte())
-            }.build() as NMSPacketDataSerializer))
+            }.build() as NMSPacketDataSerializer
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutEntityHeadRotation::class.java, buf))
         } else {
             packetHandler.sendPacket(player, NMS16PacketPlayOutEntityHeadRotation().also {
                 it.a(createDataSerializer {
@@ -165,10 +166,11 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
 
     override fun updatePassengers(player: List<Player>, entityId: Int, vararg passengers: Int) {
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutMount(createDataSerializer {
+            val buf = createDataSerializer {
                 writeVarInt(entityId)
                 writeVarIntArray(passengers)
-            }.build() as NMSPacketDataSerializer))
+            }.build() as NMSPacketDataSerializer
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutMount::class.java, buf))
         } else {
             packetHandler.sendPacket(player, NMS16PacketPlayOutMount().also {
                 it.a(createDataSerializer {
@@ -185,10 +187,11 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
 
     override fun updateEntityAnimation(player: List<Player>, entityId: Int, animation: BukkitAnimation) {
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutAnimation(createDataSerializer {
+            val buf = createDataSerializer {
                 writeVarInt(entityId)
                 writeByte(animation.ordinal.toByte())
-            }.build() as NMSPacketDataSerializer))
+            }.build() as NMSPacketDataSerializer
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutAnimation::class.java, buf))
         } else {
             packetHandler.sendPacket(player, NMS16PacketPlayOutAnimation().also {
                 it.a(createDataSerializer {
@@ -205,10 +208,11 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
 
     override fun updateEntityAttach(player: List<Player>, attached: Int, holding: Int) {
         if (isUniversal) {
-            packetHandler.sendPacket(player, NMSPacketPlayOutAttachEntity(createDataSerializer {
+            val buf = createDataSerializer {
                 writeVarInt(attached)
                 writeVarInt(holding)
-            }.build() as NMSPacketDataSerializer))
+            }.build() as NMSPacketDataSerializer
+            packetHandler.sendPacket(player, PacketHelper.createPacket(NMSPacketPlayOutAttachEntity::class.java, buf))
         } else {
             packetHandler.sendPacket(player, NMS16PacketPlayOutAttachEntity().also {
                 it.a(createDataSerializer {
@@ -229,13 +233,18 @@ class DefaultMinecraftEntityOperator : MinecraftEntityOperator {
     }
 
     fun EquipmentSlot.toNMSEnumItemSlot(): NMSEnumItemSlot {
-        return when (this) {
-            EquipmentSlot.HAND -> NMSEnumItemSlot.MAINHAND
-            EquipmentSlot.OFF_HAND -> NMSEnumItemSlot.OFFHAND
-            EquipmentSlot.FEET -> NMSEnumItemSlot.FEET
-            EquipmentSlot.LEGS -> NMSEnumItemSlot.LEGS
-            EquipmentSlot.CHEST -> NMSEnumItemSlot.CHEST
-            EquipmentSlot.HEAD -> NMSEnumItemSlot.HEAD
+        return when {
+            this == EquipmentSlot.HAND -> NMSEnumItemSlot.MAINHAND
+            this == EquipmentSlot.OFF_HAND -> NMSEnumItemSlot.OFFHAND
+            this == EquipmentSlot.FEET -> NMSEnumItemSlot.FEET
+            this == EquipmentSlot.LEGS -> NMSEnumItemSlot.LEGS
+            this == EquipmentSlot.CHEST -> NMSEnumItemSlot.CHEST
+            this == EquipmentSlot.HEAD -> NMSEnumItemSlot.HEAD
+            this.name == "BODY" -> {
+                // Try to find BODY enum, otherwise fallback to CHEST
+                val bodySlot = NMSEnumItemSlot.values().find { it.name == "BODY" } ?: NMSEnumItemSlot.CHEST
+                bodySlot
+            }
             else -> error("Unknown EquipmentSlot: $this")
         }
     }

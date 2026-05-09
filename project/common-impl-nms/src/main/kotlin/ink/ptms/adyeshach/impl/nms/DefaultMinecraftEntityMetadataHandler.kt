@@ -104,7 +104,7 @@ class DefaultMinecraftEntityMetadataHandler : MinecraftEntityMetadataHandler {
         return if (majorLegacy >= 11903) {
             NMS19.instance.createPacketPlayOutEntityMetadata(entityId, metaList)
         } else if (isUniversal) {
-            NMSPacketPlayOutEntityMetadata(createDataSerializer {
+            PacketHelper.createPacket(NMSPacketPlayOutEntityMetadata::class.java, createDataSerializer {
                 writeVarInt(entityId)
                 writeMetadataLegacy(metaList.map { it.source() })
             }.build() as NMSPacketDataSerializer)
