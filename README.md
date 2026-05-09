@@ -13,3 +13,4 @@ gradlew.bat clean build
 ```shell
 ./gradlew clean build
 ```
+更新对于1.21.4的支持与修复其他BUGS,需要packetevents做前置。
